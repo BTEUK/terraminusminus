@@ -53,8 +53,8 @@ dependencies {
     implementation "org.apache.commons:commons-lang3:3.12.0"
     implementation "it.unimi.dsi:fastutil:8.5.6"
     implementation "com.google.code.gson:gson:2.8.9"
-    implementation "com.google.guava:guava:31.0.1-jre"
-    implementation "io.netty:netty-all:4.1.97.Final"
+    implementation "com.google.guava:guava:33.0.1-jre"
+    implementation "io.netty:netty-all:4.1.114.Final"
     implementation "org.apache.logging.log4j:log4j-api:2.17.1"
     implementation "org.apache.logging.log4j:log4j-core:2.17.1"
 
@@ -69,7 +69,7 @@ dependencies {
     annotationProcessor "org.projectlombok:lombok:1.18.32"
 
     // Bindings to other projects
-    compileOnly "io.papermc.paper:paper-api:1.21-R0.1-SNAPSHOT"
+    compileOnly "io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT"
 
 }
 
