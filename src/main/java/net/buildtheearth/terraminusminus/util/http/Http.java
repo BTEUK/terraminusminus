@@ -26,7 +26,6 @@ import lombok.experimental.UtilityClass;
 import net.buildtheearth.terraminusminus.TerraConfig;
 import net.buildtheearth.terraminusminus.TerraMinusMinus;
 import net.daporkchop.lib.common.function.throwing.EFunction;
-import net.daporkchop.lib.common.misc.threadfactory.PThreadFactories;
 import net.daporkchop.lib.common.reference.cache.Cached;
 
 import javax.net.ssl.SSLException;
@@ -58,7 +57,7 @@ import static net.daporkchop.lib.common.util.PValidation.*;
 public class Http {
     protected static final long TIMEOUT = 20L;
 
-    private final ThreadFactory NETWORK_THREAD_FACTORY = PThreadFactories.builder().daemon().minPriority().name("terra++ HTTP network thread").build();
+    private final ThreadFactory NETWORK_THREAD_FACTORY = Thread.ofVirtual().factory();
 
     protected final EventLoop NETWORK_EVENT_LOOP = (Epoll.isAvailable()
             ? new EpollEventLoopGroup(1, NETWORK_THREAD_FACTORY) //use epoll on linux systems wherever possible
