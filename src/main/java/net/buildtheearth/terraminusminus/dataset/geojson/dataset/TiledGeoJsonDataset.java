@@ -46,15 +46,9 @@ public class TiledGeoJsonDataset extends TiledDataset<GeoJsonObject[]> implement
                 .map(this::getAsync)
                 .toArray(CompletableFuture[]::new));
 
-        return CompletableFuture.allOf(futures).thenApply(unused -> {
-            ConcurrentLinkedQueue<GeoJsonObject[]> completedFuturesList = new ConcurrentLinkedQueue<>();
-            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                Arrays.stream(futures).forEach(future -> executor.submit(() -> completedFuturesList.add(future.join())));
-                executor.awaitTermination(1L, TimeUnit.MINUTES);
-                return completedFuturesList.toArray(GeoJsonObject[][]::new);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-        });
+        return CompletableFuture.allOf(futures).thenApply(unused ->
+                Arrays.stream(futures)
+                        .map(CompletableFuture::join)
+                        .toArray(GeoJsonObject[][]::new));
     }
 }

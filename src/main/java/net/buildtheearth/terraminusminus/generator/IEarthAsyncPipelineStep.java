@@ -18,8 +18,20 @@ import static net.daporkchop.lib.common.util.PorkUtil.*;
  * @author DaPorkchop_
  */
 public interface IEarthAsyncPipelineStep<D, V, B extends IEarthAsyncDataBuilder<V>> {
+
+    /**
+     * Get a CompletableFuture for data V.
+     *
+     * @param pos the chunk coordinates
+     * @param datasets datasets to use
+     * @param steps
+     * @param builderFactory
+     * @return
+     * @param <V> the data
+     * @param <B> the builder
+     */
     static <V, B extends IEarthAsyncDataBuilder<V>> CompletableFuture<V> getFuture(ChunkPos pos, GeneratorDatasets datasets, IEarthAsyncPipelineStep<?, V, B>[] steps, Supplier<B> builderFactory) {
-        //i used the future to create the future
+        //I used the future to create the future
         return CompletableFuture.supplyAsync(() -> {
             int baseX = ChunkPos.cubeToMinBlock(pos.x());
             int baseZ = ChunkPos.cubeToMinBlock(pos.z());

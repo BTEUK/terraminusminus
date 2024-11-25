@@ -31,6 +31,8 @@ import net.daporkchop.lib.common.reference.cache.Cached;
 
 import javax.net.ssl.SSLException;
 import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -253,33 +255,38 @@ public class Http {
 
             synchronized void step(@NonNull String url) {
                 try {
-                    this.parsed = new URL(url);
-                } catch (MalformedURLException e) {
-                    throw new IllegalArgumentException(url, e);
-                }
-
-                if ("file".equalsIgnoreCase(this.parsed.getProtocol())) { //it's a file, read from disk (also async)
-                    Path path = Paths.get(url.substring("file://".length()));
-                    if (!TerraConfig.reducedConsoleMessages) {
-                        future.whenComplete((data, t) -> {
-                            if (t != null) {
-                                TerraMinusMinus.LOGGER.error("Failed to read file: " + path, t);
-                            } else if (data != null) {
-                                TerraMinusMinus.LOGGER.info("Read file: {}", path);
-                            } else {
-                                TerraMinusMinus.LOGGER.info("File not found: {}", path);
-                            }
-                        });
+                    TerraMinusMinus.LOGGER.info("Entering step call");
+                    try {
+                        this.parsed = new URI(url).toURL();
+                    } catch (URISyntaxException | MalformedURLException e) {
+                        throw new IllegalArgumentException(url, e);
                     }
-                    copyResultTo(Disk.read(path), future);
-                    return;
-                }
 
-                if (TerraConfig.http.cache) { //attempt to read from cache
-                    this.cacheFile = Disk.cacheFileFor(this.parsed.toString());
-                    Disk.read(this.cacheFile).whenComplete(this);
-                } else { //send the actual request
-                    managerFor(this.parsed).submit(this.parsed.getFile(), this, this.nextHeaders);
+                    if ("file".equalsIgnoreCase(this.parsed.getProtocol())) { //it's a file, read from disk (also async)
+                        Path path = Paths.get(url.substring("file://".length()));
+                        if (!TerraConfig.reducedConsoleMessages) {
+                            future.whenComplete((data, t) -> {
+                                if (t != null) {
+                                    TerraMinusMinus.LOGGER.error("Failed to read file: " + path, t);
+                                } else if (data != null) {
+                                    TerraMinusMinus.LOGGER.info("Read file: {}", path);
+                                } else {
+                                    TerraMinusMinus.LOGGER.info("File not found: {}", path);
+                                }
+                            });
+                        }
+                        copyResultTo(Disk.read(path), future);
+                        return;
+                    }
+
+                    if (TerraConfig.http.cache) { //attempt to read from cache
+                        this.cacheFile = Disk.cacheFileFor(this.parsed.toString());
+                        Disk.read(this.cacheFile).whenComplete(this);
+                    } else { //send the actual request
+                        managerFor(this.parsed).submit(this.parsed.getFile(), this, this.nextHeaders);
+                    }
+                } finally {
+                    TerraMinusMinus.LOGGER.info("Exiting step call");
                 }
             }
         }
@@ -295,8 +302,8 @@ public class Http {
      */
     public void setMaximumConcurrentRequestsTo(@NonNull String host, int maxConcurrentRequests) {
         try {
-            managerFor(new URL(host)).setMaxConcurrentRequests(maxConcurrentRequests);
-        } catch (MalformedURLException e) {
+            managerFor(new URI(host).toURL()).setMaxConcurrentRequests(maxConcurrentRequests);
+        } catch (URISyntaxException | MalformedURLException e) {
             throw new IllegalArgumentException(host, e);
         }
     }
