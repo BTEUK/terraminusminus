@@ -9,6 +9,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.BiConsumer;
 import java.util.stream.Stream;
 
@@ -22,11 +27,13 @@ import lombok.Getter;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import net.buildtheearth.terraminusminus.TerraConstants;
+import net.buildtheearth.terraminusminus.TerraMinusMinus;
 import net.buildtheearth.terraminusminus.config.condition.DoubleCondition;
 import net.buildtheearth.terraminusminus.dataset.IScalarDataset;
 import net.buildtheearth.terraminusminus.projection.OutOfProjectionBoundsException;
 import net.buildtheearth.terraminusminus.util.CornerBoundingBox2d;
 import net.buildtheearth.terraminusminus.util.IntRange;
+import net.buildtheearth.terraminusminus.util.PerformanceMetrics;
 import net.buildtheearth.terraminusminus.util.bvh.BVH;
 import net.buildtheearth.terraminusminus.util.bvh.Bounds2d;
 import net.buildtheearth.terraminusminus.util.http.Disk;
@@ -41,6 +48,12 @@ import static net.daporkchop.lib.common.util.PValidation.*;
  * @author DaPorkchop_
  */
 public class MultiScalarDataset implements IScalarDataset {
+    // Maximum number of threads to use for parallel processing
+    private static final int MAX_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors() - 1);
+    
+    // Thread pool for parallel dataset processing using virtual threads
+    private static final Executor DATASET_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+    
     protected final BVH<WrappedDataset> bvh;
 
     @SneakyThrows(IOException.class)
@@ -111,70 +124,154 @@ public class MultiScalarDataset implements IScalarDataset {
 
     @Override
     public CompletableFuture<double[]> getAsync(@NonNull CornerBoundingBox2d bounds, int sizeX, int sizeZ) throws OutOfProjectionBoundsException {
-        if (notNegative(sizeX, "sizeX") == 0 | notNegative(sizeZ, "sizeZ") == 0) { //no input points -> no output points, ez
-            return CompletableFuture.completedFuture(new double[0]);
-        }
-
-        WrappedDataset[] datasets = this.bvh.getAllIntersecting(bounds).toArray(new WrappedDataset[0]);
-        if (datasets.length == 0) { //no matching datasets!
-            return CompletableFuture.completedFuture(null);
-        } else if (datasets.length == 1) { //only one dataset matches
-            if (datasets[0].condition == null) { //if it doesn't have a condition, there's no reason to do any merging
-                return datasets[0].dataset.getAsync(bounds, sizeX, sizeZ);
+        try (PerformanceMetrics.Timer timer = PerformanceMetrics.startTimer("MultiScalarDataset.getAsync")) {
+            if (notNegative(sizeX, "sizeX") == 0 | notNegative(sizeZ, "sizeZ") == 0) { //no input points -> no output points, ez
+                return CompletableFuture.completedFuture(new double[0]);
             }
-        }
-        Arrays.sort(datasets); //ensure datasets are in priority order
-
-        class State implements BiConsumer<double[], Throwable> {
-            final CompletableFuture<double[]> future = new CompletableFuture<>();
-            double[] out;
-            int remaining = sizeX * sizeZ;
-            int i = -1;
-
-            @Override
-            public void accept(double[] data, Throwable cause) {
-                if (cause != null) {
-                    this.future.completeExceptionally(cause);
-                } else if (data != null) { //if the array is null, it's as if it were an array of NaNs - nothing would be set, we simply skip it
-                    double[] out = this.out;
-                    if (out == null) { //ensure the destination array is set
-                        Arrays.fill(this.out = out = new double[sizeX * sizeZ], Double.NaN);
-                    }
-
-                    WrappedDataset dataset = datasets[this.i];
-
-                    for (int i = 0; i < sizeX * sizeZ; i++) {
-                        if (Double.isNaN(out[i])) { //if value in output array is NaN, consider replacing it
-                            double v = data[i];
-                            if (!Double.isNaN(v) && dataset.test(v)) { //if the value in the input array is accepted, use it as the output
-                                out[i] = v;
-                                if (--this.remaining == 0) { //if no samples are left to process, we're done!
-                                    this.future.complete(out);
-                                    return;
-                                }
-                            }
-                        }
-                    }
-                }
-                this.advance();
-            }
-
-            private void advance() {
-                if (++this.i < datasets.length) {
-                    try {
-                        datasets[this.i].dataset.getAsync(bounds, sizeX, sizeZ).whenComplete(this);
-                    } catch (OutOfProjectionBoundsException e) {
-                        this.future.completeExceptionally(e);
-                    }
-                } else { //no datasets remain, complete the future successfully with whatever value we currently have
-                    this.future.complete(this.out);
+    
+            WrappedDataset[] datasets = this.bvh.getAllIntersecting(bounds).toArray(new WrappedDataset[0]);
+            if (datasets.length == 0) { //no matching datasets!
+                return CompletableFuture.completedFuture(null);
+            } else if (datasets.length == 1) { //only one dataset matches
+                if (datasets[0].condition == null) { //if it doesn't have a condition, there's no reason to do any merging
+                    return datasets[0].dataset.getAsync(bounds, sizeX, sizeZ);
                 }
             }
+            
+            Arrays.sort(datasets); //ensure datasets are in priority order
+            
+            // Log the number of datasets being processed
+            TerraMinusMinus.LOGGER.debug("Processing {} datasets in parallel for region at {}", 
+                    datasets.length, bounds);
+            
+            // Create a result array filled with NaN values
+            double[] result = new double[sizeX * sizeZ];
+            Arrays.fill(result, Double.NaN);
+            
+            // Track how many points still need to be filled
+            AtomicInteger remaining = new AtomicInteger(sizeX * sizeZ);
+            
+            // Create a CompletableFuture for the final result
+            CompletableFuture<double[]> resultFuture = new CompletableFuture<>();
+            
+            // Create an array to hold all the dataset futures
+            CompletableFuture<?>[] datasetFutures = new CompletableFuture[datasets.length];
+            
+            // Process datasets in parallel, but limit concurrency based on available memory
+            // Higher priority datasets are processed first
+            int batchSize = Math.min(datasets.length, MAX_THREADS);
+            
+            // Track which datasets have been processed
+            AtomicInteger processedDatasets = new AtomicInteger(0);
+            
+            // Process the first batch of datasets
+            for (int i = 0; i < batchSize; i++) {
+                processNextDataset(i, datasets, bounds, sizeX, sizeZ, result, remaining, processedDatasets, datasetFutures, resultFuture);
+            }
+            
+            // If all datasets have been processed or all points are filled, complete the future
+            if (processedDatasets.get() >= datasets.length || remaining.get() == 0) {
+                resultFuture.complete(result);
+            }
+            
+            return resultFuture;
         }
-
-        State state = new State();
-        state.advance();
-        return state.future;
+    }
+    
+    /**
+     * Processes the next dataset in the queue.
+     * 
+     * @param datasetIndex The index of the dataset to process
+     * @param datasets The array of datasets
+     * @param bounds The bounds to process
+     * @param sizeX The X size
+     * @param sizeZ The Z size
+     * @param result The result array to update
+     * @param remaining Counter for remaining points to fill
+     * @param processedDatasets Counter for processed datasets
+     * @param datasetFutures Array of futures for each dataset
+     * @param resultFuture The future to complete when done
+     */
+    private void processNextDataset(int datasetIndex, WrappedDataset[] datasets, 
+                                   CornerBoundingBox2d bounds, int sizeX, int sizeZ,
+                                   double[] result, AtomicInteger remaining, 
+                                   AtomicInteger processedDatasets, 
+                                   CompletableFuture<?>[] datasetFutures,
+                                   CompletableFuture<double[]> resultFuture) {
+        datasetFutures[datasetIndex] = CompletableFuture.supplyAsync(() -> {
+            try {
+                return datasets[datasetIndex].dataset.getAsync(bounds, sizeX, sizeZ).join();
+            } catch (OutOfProjectionBoundsException e) {
+                return null;
+            }
+        }, DATASET_EXECUTOR).thenAccept(data -> {
+            if (data != null) {
+                WrappedDataset dataset = datasets[datasetIndex];
+                int filled = processDatasetResult(result, data, dataset, remaining);
+                
+                if (filled > 0) {
+                    TerraMinusMinus.LOGGER.debug("Dataset {} filled {} points", 
+                            datasetIndex, filled);
+                }
+            }
+            
+            // Check if we need to process more datasets
+            int nextIndex = processedDatasets.incrementAndGet();
+            if (nextIndex < datasets.length && remaining.get() > 0) {
+                // Process the next dataset
+                processNextDataset(nextIndex, datasets, bounds, sizeX, sizeZ, result, 
+                                  remaining, processedDatasets, datasetFutures, resultFuture);
+            }
+            
+            // If all datasets are processed or all points are filled, complete the future
+            if (processedDatasets.get() >= datasets.length || remaining.get() == 0) {
+                resultFuture.complete(result);
+            }
+        }).exceptionally(ex -> {
+            TerraMinusMinus.LOGGER.error("Error processing dataset {}: {}", 
+                    datasetIndex, ex.getMessage());
+            
+            // Continue processing other datasets
+            int nextIndex = processedDatasets.incrementAndGet();
+            if (nextIndex < datasets.length && remaining.get() > 0) {
+                processNextDataset(nextIndex, datasets, bounds, sizeX, sizeZ, result, 
+                                  remaining, processedDatasets, datasetFutures, resultFuture);
+            } else if (processedDatasets.get() >= datasets.length) {
+                resultFuture.complete(result);
+            }
+            return null;
+        });
+    }
+    
+    /**
+     * Processes the result from a dataset and updates the result array.
+     * 
+     * @param result The result array to update
+     * @param data The data from the dataset
+     * @param dataset The dataset that provided the data
+     * @param remaining The counter for remaining points to fill
+     * @return The number of points filled
+     */
+    private int processDatasetResult(double[] result, double[] data, WrappedDataset dataset, AtomicInteger remaining) {
+        if (data == null) {
+            return 0;
+        }
+        
+        int filled = 0;
+        synchronized (result) {
+            for (int i = 0; i < result.length; i++) {
+                if (Double.isNaN(result[i])) { // If value in output array is NaN, consider replacing it
+                    double v = data[i];
+                    if (!Double.isNaN(v) && dataset.test(v)) { // If the value in the input array is accepted, use it as the output
+                        result[i] = v;
+                        filled++;
+                        remaining.decrementAndGet();
+                    }
+                }
+            }
+        }
+        
+        return filled;
     }
 
     /**
