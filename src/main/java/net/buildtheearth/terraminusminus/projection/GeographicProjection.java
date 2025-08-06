@@ -15,53 +15,15 @@ import java.util.Collections;
 import java.util.Map;
 
 /**
- * Interface for geographic projections that convert between Earth coordinates and Minecraft coordinates.
+ * Support for various projection types.
  * <p>
  * The geographic space is the surface of the earth, parameterized by the usual spherical coordinates system of latitude and longitude.
  * The projected space is a plane on to which the geographic space is being projected, and is parameterized by a 2D Cartesian coordinate system (x and y).
  * <p>
  * A projection as defined here is something that projects a point in the geographic space to a point of the projected space (and vice versa).
  * <p>
- * All geographic coordinates are in degrees (latitude: -90 to 90, longitude: -180 to 180).
- * <p>
- * The library includes several projection implementations:
- * <ul>
- *   <li>Equirectangular: Simple plate carrée projection</li>
- *   <li>Web Mercator: The projection used by most web mapping services</li>
- *   <li>Dymaxion: Fuller's projection that minimizes distortion</li>
- *   <li>Airocean: Modified Dymaxion projection optimized for the BuildTheEarth project</li>
- * </ul>
- * <p>
- * Projections can be transformed using various transformation classes:
- * <ul>
- *   <li>{@link net.buildtheearth.terraminusminus.projection.transform.ScaleProjectionTransform}: Scales the projection</li>
- *   <li>{@link net.buildtheearth.terraminusminus.projection.transform.OffsetProjectionTransform}: Applies an offset</li>
- *   <li>{@link net.buildtheearth.terraminusminus.projection.transform.FlipHorizontalProjectionTransform}: Flips horizontally</li>
- *   <li>{@link net.buildtheearth.terraminusminus.projection.transform.FlipVerticalProjectionTransform}: Flips vertically</li>
- *   <li>{@link net.buildtheearth.terraminusminus.projection.transform.SwapAxesProjectionTransform}: Swaps X and Y axes</li>
- * </ul>
- * <p>
- * Usage example:
- * <pre>
- * // Create a projection
- * GeographicProjection projection = EarthGeneratorSettings.parse(EarthGeneratorSettings.BTE_DEFAULT_SETTINGS).projection();
- * 
- * // Apply an offset transformation
- * projection = new OffsetProjectionTransform(projection, xOffset, zOffset);
- * 
- * // Convert from geographic to projected coordinates
- * double[] projected = projection.fromGeo(longitude, latitude);
- * double x = projected[0];
- * double z = projected[1];
- * 
- * // Convert from projected to geographic coordinates
- * double[] geographic = projection.toGeo(x, z);
- * double longitude = geographic[0];
- * double latitude = geographic[1];
- * </pre>
+ * All geographic coordinates are in degrees.
  *
- * @see net.buildtheearth.terraminusminus.projection.transform.ProjectionTransform
- * @see net.buildtheearth.terraminusminus.generator.EarthGeneratorSettings
  */
 @JsonDeserialize(using = GeographicProjection.Deserializer.class)
 @JsonSerialize(using = GeographicProjection.Serializer.class)
