@@ -18,8 +18,17 @@ import static net.daporkchop.lib.common.util.PorkUtil.*;
  * @author DaPorkchop_
  */
 public interface IEarthAsyncPipelineStep<D, V, B extends IEarthAsyncDataBuilder<V>> {
+    /**
+     * Retrieves a CompletableFuture of {@link V}
+     * @param pos the chunk position
+     * @param datasets dataset wrapper
+     * @param steps Array of {@link IEarthAsyncPipelineStep}
+     * @param builderFactory {@link Supplier} of {@link B}
+     * @return a ComplatableFuture of {@link V}
+     * @param <V> return type
+     * @param <B> implementation of {@link IEarthAsyncDataBuilder}
+     */
     static <V, B extends IEarthAsyncDataBuilder<V>> CompletableFuture<V> getFuture(ChunkPos pos, GeneratorDatasets datasets, IEarthAsyncPipelineStep<?, V, B>[] steps, Supplier<B> builderFactory) {
-        //i used the future to create the future
         return CompletableFuture.supplyAsync(() -> {
             int baseX = ChunkPos.cubeToMinBlock(pos.x());
             int baseZ = ChunkPos.cubeToMinBlock(pos.z());
@@ -47,10 +56,12 @@ public interface IEarthAsyncPipelineStep<D, V, B extends IEarthAsyncDataBuilder<
                     .thenApply(unused -> {
                         B builder = builderFactory.get();
 
+                        long start = System.currentTimeMillis();
                         for (int i = 0; i < steps.length; i++) {
                             CompletableFuture<?> stepFuture = futures[i];
                             steps[i].bake(pos, builder, stepFuture != null ? uncheckedCast(stepFuture.join()) : null);
                         }
+                        TerraMinusMinus.LOGGER.debug("requesting data plus bake took {} ms", System.currentTimeMillis() - start);
 
                         return builder.build();
                     });
