@@ -54,14 +54,25 @@ public interface IEarthAsyncPipelineStep<D, V, B extends IEarthAsyncDataBuilder<
 
             CompletableFuture<V> future = (nonNullFutures.length != 0 ? CompletableFuture.allOf(nonNullFutures) : CompletableFuture.completedFuture(null))
                     .thenApply(unused -> {
-                        B builder = builderFactory.get();
-
-                        long start = System.currentTimeMillis();
+                        // Create an array of CompletableFutures for parallel joining
+                        CompletableFuture<?>[] joinFutures = new CompletableFuture[steps.length];
                         for (int i = 0; i < steps.length; i++) {
                             CompletableFuture<?> stepFuture = futures[i];
-                            steps[i].bake(pos, builder, stepFuture != null ? uncheckedCast(stepFuture.join()) : null);
+                            joinFutures[i] = stepFuture != null
+                                    ? CompletableFuture.supplyAsync(stepFuture::join)
+                                    : CompletableFuture.completedFuture(null);
                         }
-                        TerraMinusMinus.LOGGER.info("requesting data plus bake took {} ms", System.currentTimeMillis() - start);
+
+                        // Wait for all joins to complete
+                        CompletableFuture.allOf(joinFutures).join();
+
+                        B builder = builderFactory.get();
+
+                        // Process the pre-joined results sequentially
+                        for (int i = 0; i < steps.length; i++) {
+                            steps[i].bake(pos, builder, uncheckedCast(joinFutures[i].join()));
+                        }
+
 
                         return builder.build();
                     });
