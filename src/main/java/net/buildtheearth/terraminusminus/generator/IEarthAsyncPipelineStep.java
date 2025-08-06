@@ -61,7 +61,7 @@ public interface IEarthAsyncPipelineStep<D, V, B extends IEarthAsyncDataBuilder<
                             CompletableFuture<?> stepFuture = futures[i];
                             steps[i].bake(pos, builder, stepFuture != null ? uncheckedCast(stepFuture.join()) : null);
                         }
-                        TerraMinusMinus.LOGGER.debug("requesting data plus bake took {} ms", System.currentTimeMillis() - start);
+                        TerraMinusMinus.LOGGER.info("requesting data plus bake took {} ms", System.currentTimeMillis() - start);
 
                         return builder.build();
                     });
