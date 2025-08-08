@@ -8,26 +8,14 @@ compileJava {
     sourceCompatibility = targetCompatibility = "21"
 }
 
-version = ("0.0.1-" + ('git rev-parse --abbrev-ref HEAD'.execute().text.trim()) + "-" + ('git rev-parse --short HEAD'.execute().text.trim())).replace("/", "-")
+version = 'git rev-parse --abbrev-ref HEAD'.execute().text.trim().replace("/", "-") + "-SNAPSHOT"
 group = "net.buildtheearth"
 
 repositories {
     mavenCentral()
-    maven {
-        name = "JitPack"
-        url = "https://jitpack.io/"
-    }
     maven { // Required for leveldb
         name = "DaPorkchop_"
         url = "https://maven.daporkchop.net/"
-    }
-    maven { // Required for leveldb
-        name = "OpenCollab Snapshots"
-        url = "https://repo.opencollab.dev/snapshot/"
-    }
-    maven { // Required for LZMA
-        name = "Sponge"
-        url = "https://repo.spongepowered.org/maven"
     }
     maven { // For bukkit api bindings
         name = "PaperMC"
@@ -41,31 +29,27 @@ dependencies {
     // If they are needed here, it's because Terra++ ultimately needs them as well.
 
     // Terra++ dependencies
-    implementation "com.github.DaMatrix:commons-imaging:4c6c5dfe6401a884cb4cf53fb838c99e1dfb104c"
-    implementation "com.fasterxml.jackson.core:jackson-databind:2.18.0"
+    implementation "org.apache.commons:commons-imaging:1.0.0-alpha5"
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.19.2'
     implementation("net.daporkchop.lib:binary:0.5.7-SNAPSHOT")  {
         exclude group: "io.netty"
     }
 
     // Minecraft dependencies
-    implementation "commons-codec:commons-codec:1.15"
-    implementation "org.apache.commons:commons-lang3:3.12.0"
-    implementation "it.unimi.dsi:fastutil:8.5.6"
-    implementation "com.google.code.gson:gson:2.8.9"
-    implementation "com.google.guava:guava:33.3.1-jre"
-    implementation "io.netty:netty-all:4.1.114.Final"
-    implementation "org.apache.logging.log4j:log4j-api:2.17.1"
-    implementation "org.apache.logging.log4j:log4j-core:2.17.1"
-
-    // Mixin dependencies
-    implementation 'lzma:lzma:0.0.1'
+    implementation "it.unimi.dsi:fastutil:8.5.16"
+    implementation "com.google.code.gson:gson:2.13.1"
+    implementation "com.google.guava:guava:33.4.8-jre"
+    implementation "io.netty:netty-all:4.2.3.Final"
+    implementation "org.apache.logging.log4j:log4j-api:2.25.1"
+    implementation "org.apache.logging.log4j:log4j-core:2.25.1"
 
     // Tests
     testImplementation "junit:junit:4.13.2"
 
-    // Lombok
-    compileOnly "org.projectlombok:lombok:1.18.32"
-    annotationProcessor "org.projectlombok:lombok:1.18.32"
+    // Annotations
+    compileOnly "org.projectlombok:lombok:1.18.38"
+    annotationProcessor "org.projectlombok:lombok:1.18.38"
+    compileOnly 'org.jetbrains:annotations:26.0.2'
 
     // Bindings to other projects
     compileOnly "io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT"
@@ -73,18 +57,23 @@ dependencies {
 }
 
 publishing {
-    publications {
-        maven(MavenPublication) {
-            groupId = project.group
-            artifactId = 'terraminusminus'
-            version = project.version
-
-            from components.java
+    repositories {
+        maven {
+            name = "smylerSnapshots"
+            url = uri("https://maven.smyler.net/snapshots")
+            credentials {
+                username System.getenv("MAVEN_NAME")
+                password System.getenv("MAVEN_SECRET")
+            }
         }
     }
-}
-
-java {
-    toolchain.languageVersion.set(JavaLanguageVersion.of(21))
+    publications {
+        terraminusminus(MavenPublication) {
+            groupId = project.group
+            artifactId = "terraminusminus"
+            version = project.version
+            from(components["java"])
+        }
+    }
 }
 
