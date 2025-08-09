@@ -98,7 +98,7 @@ final class HostManager extends Host {
      */
     public void setMaxConcurrentRequests(int maxConcurrentRequests) {
         this.maxConcurrentRequests = positive(maxConcurrentRequests, "maxConcurrentRequests");
-        TerraMinusMinus.LOGGER.debug("Updated maxConcurrentRequests to {}", this.maxConcurrentRequests);
+        TerraMinusMinus.LOGGER.info("Updated maxConcurrentRequests to {}", this.maxConcurrentRequests);
     }
 
     private void tryWorkOffQueue() {
