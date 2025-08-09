@@ -8,11 +8,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import net.buildtheearth.terraminusminus.projection.OutOfProjectionBoundsException;
-import org.apache.commons.lang3.StringUtils;
+import net.daporkchop.lib.common.util.PArrays;
 
-import com.google.common.base.Strings;
 
 import static net.buildtheearth.terraminusminus.projection.OutOfProjectionBoundsException.*;
+import static net.buildtheearth.terraminusminus.util.Strings.*;
 
 /**
  * Utilities for assisting in the parsing of latitude and longitude strings into Decimals.
@@ -76,7 +76,7 @@ public final class CoordinateParseUtils {
      * @return the parsed coordinates
      */
     public static LatLng parseVerbatimCoordinates(final String coordinates) {
-        if (Strings.isNullOrEmpty(coordinates)) {
+        if (isNullOrEmpty(coordinates)) {
             return null;
         }
         try {
@@ -173,7 +173,7 @@ public final class CoordinateParseUtils {
         coordinates = coordinates.trim();
 
         // Then, look for the first blank, if there is one
-        final int firstBlankStart = coordinates.indexOf(" ");
+        int firstBlankStart = coordinates.indexOf(" ");
         if (firstBlankStart > 0) {
             int firstBlankEnd = firstBlankStart;
             while (coordinates.charAt(firstBlankEnd) == ' ') firstBlankEnd++;
@@ -181,14 +181,26 @@ public final class CoordinateParseUtils {
             // Then look for any other blank, if there is one, the string is malformed
             if (coordinates.indexOf(' ', firstBlankEnd) >= 0) throw new NumberFormatException();
 
+            // If the first char directly before the blank is a part separator,
+            // and is the only occurrence, consider it part of the blank
+            char charBeforeBlank = coordinates.charAt(firstBlankStart - 1);
+            if (firstBlankStart > 1
+                    && PArrays.linearSearch(PART_DELIMITERS, charBeforeBlank) >= 0
+                    && coordinates.indexOf(charBeforeBlank, firstBlankEnd) < 0) {
+                firstBlankStart--;
+            }
+
             // Split at the blank
             return new String[] {coordinates.substring(0, firstBlankStart), coordinates.substring(firstBlankEnd)};
         }
 
-        // Look for a potential delimiter that only appears once
+        // Look for a potential delimiter that only appears once and is not at the start or end of the string
         for (final char delimiter : PART_DELIMITERS) {
-            int count = StringUtils.countMatches(coordinates, String.valueOf(delimiter));
-            if (count == 1) return StringUtils.split(coordinates, delimiter);
+            int count = countMatches(coordinates, String.valueOf(delimiter));
+            int delimiterIndex;
+            if (count == 1 && (delimiterIndex = coordinates.indexOf(delimiter)) > 0 && delimiterIndex < coordinates.length() - 1) {
+                return split(coordinates, delimiter);
+            }
         }
 
         // We didn't manage to split, the string is malformed
@@ -259,6 +271,7 @@ public final class CoordinateParseUtils {
     }
 
     private static double parseDoubleWithCommaDecimalSeparator(String str) {
+        if (str.indexOf(".") > 0) throw new NumberFormatException("Illegal char in comma number: " + ".");
         return Double.parseDouble(str.replaceAll(",", "."));
     }
 
