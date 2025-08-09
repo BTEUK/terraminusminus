@@ -5,7 +5,7 @@ plugins {
 }
 
 compileJava {
-    sourceCompatibility = targetCompatibility = "17"
+    sourceCompatibility = targetCompatibility = "21"
 }
 
 version = 'git rev-parse --abbrev-ref HEAD'.execute().text.trim().replace("/", "-") + "-SNAPSHOT"
@@ -18,8 +18,8 @@ repositories {
         url = "https://maven.daporkchop.net/"
     }
     maven { // For bukkit api bindings
-        name = "SpigotMC"
-        url = "https://hub.spigotmc.org/nexus/content/repositories/snapshots/"
+        name = "PaperMC"
+        url = "https://repo.papermc.io/repository/maven-public/"
     }
 }
 
@@ -52,7 +52,7 @@ dependencies {
     compileOnly 'org.jetbrains:annotations:26.0.2'
 
     // Bindings to other projects
-    compileOnly "org.spigotmc:spigot-api:1.18.1-R0.1-SNAPSHOT"
+    compileOnly "io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT"
 
 }
 
