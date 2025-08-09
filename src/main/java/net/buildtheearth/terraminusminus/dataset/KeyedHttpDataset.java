@@ -1,5 +1,6 @@
 package net.buildtheearth.terraminusminus.dataset;
 
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 
@@ -18,7 +19,7 @@ public abstract class KeyedHttpDataset<V> extends Dataset<String, V> {
     @NonNull
     protected final String[] urls;
 
-    protected abstract V decode(@NonNull String path, @NonNull ByteBuf data) throws Exception;
+    protected abstract V decode(@NonNull String path, @NonNull ByteBuf data) throws IOException;
 
     @Override
     public CompletableFuture<V> load(@NonNull String key) throws Exception {

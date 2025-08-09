@@ -28,6 +28,8 @@ import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.ToString;
 import net.buildtheearth.terraminusminus.TerraConstants;
+import net.buildtheearth.terraminusminus.TerraMinusMinus;
+import net.buildtheearth.terraminusminus.util.PerformanceTracker;
 import net.daporkchop.lib.common.misc.string.PStrings;
 import net.daporkchop.lib.common.util.PorkUtil;
 
@@ -75,9 +77,17 @@ final class HostManager extends Host {
      */
     public void submit(@NonNull String path, @NonNull Callback callback, @NonNull HttpHeaders headers) {
         NETWORK_EVENT_LOOP.submit(() -> { //force execution on network thread
-            this.pendingRequests.add(new Request(path, callback, headers)); //add to request queue
+            long startTime = System.nanoTime();
+            try {
 
-            this.tryWorkOffQueue();
+                this.pendingRequests.add(new Request(path, callback, headers)); //add to request queue
+
+                this.tryWorkOffQueue();
+            } finally {
+                long duration = System.nanoTime() - startTime;
+                PerformanceTracker.trackOperation("HTTP Request Queue", duration);
+            }
+
         });
     }
 
@@ -88,6 +98,7 @@ final class HostManager extends Host {
      */
     public void setMaxConcurrentRequests(int maxConcurrentRequests) {
         this.maxConcurrentRequests = positive(maxConcurrentRequests, "maxConcurrentRequests");
+        TerraMinusMinus.LOGGER.debug("Updated maxConcurrentRequests to {}", this.maxConcurrentRequests);
     }
 
     private void tryWorkOffQueue() {
@@ -97,21 +108,28 @@ final class HostManager extends Host {
     }
 
     private boolean trySendRequest0(@NonNull Request request) {
-        if (request.callback.isCancelled()) { //future is already completed (probably due to cancellation), pretend that we handled it
-            return true;
-        }
+        long startTime = System.nanoTime();
+        try {
 
-        for (Channel channel : this.channels) {
-            if (channel.attr(ATTR_REQUEST).compareAndSet(null, request)) { //the channel is currently inactive
-                channel.pipeline().addFirst("read_timeout", new ReadTimeoutHandler(TIMEOUT, TimeUnit.SECONDS));
-                channel.writeAndFlush(request.toNetty()); //send request
-                this.activeRequests++;
+            if (request.callback.isCancelled()) { //future is already completed (probably due to cancellation), pretend that we handled it
                 return true;
             }
-        }
 
-        this.considerOpeningAnotherConnection();
-        return false;
+            for (Channel channel : this.channels) {
+                if (channel.attr(ATTR_REQUEST).compareAndSet(null, request)) { //the channel is currently inactive
+                    channel.pipeline().addFirst("read_timeout", new ReadTimeoutHandler(TIMEOUT, TimeUnit.SECONDS));
+                    channel.writeAndFlush(request.toNetty()); //send request
+                    this.activeRequests++;
+                    return true;
+                }
+            }
+
+            this.considerOpeningAnotherConnection();
+            return false;
+        } finally {
+            long duration = System.nanoTime() - startTime;
+            PerformanceTracker.trackOperation("HTTP Send Request", duration);
+        }
     }
 
     private void considerOpeningAnotherConnection() {
@@ -121,22 +139,28 @@ final class HostManager extends Host {
     }
 
     private void handleChannelOpened(@NonNull ChannelFuture channelFuture) {
-        checkState(channelFuture == this.channelFuture, "unknown channel future?!?");
-        this.channelFuture = null;
+        long startTime = System.nanoTime();
+        try {
 
-        if (!channelFuture.isSuccess()) {
-            //TODO: fail pending requests only if no other connections are open
-            this.pendingRequests.forEach(r -> r.callback.handle(null, channelFuture.cause()));
-            this.pendingRequests.clear();
-            return;
-        }
+            checkState(channelFuture == this.channelFuture, "unknown channel future?!?");
+            this.channelFuture = null;
 
-        Channel channel = channelFuture.channel();
-        this.channels.add(channel);
-        channel.closeFuture().addListener((ChannelFutureListener) this::handleChannelClosed);
+            if (!channelFuture.isSuccess()) {
+                //TODO: fail pending requests only if no other connections are open
+                this.pendingRequests.forEach(r -> r.callback.handle(null, channelFuture.cause()));
+                this.pendingRequests.clear();
+                return;
+            }
 
-        this.tryWorkOffQueue();
-    }
+            Channel channel = channelFuture.channel();
+            this.channels.add(channel);
+            channel.closeFuture().addListener((ChannelFutureListener) this::handleChannelClosed);
+
+            this.tryWorkOffQueue();
+        } finally {
+            long duration = System.nanoTime() - startTime;
+            PerformanceTracker.trackOperation("HTTP Channel Open", duration);
+        }    }
 
     private void handleChannelClosed(@NonNull ChannelFuture channelFuture) {
         Channel channel = channelFuture.channel();
@@ -158,6 +182,8 @@ final class HostManager extends Host {
     }
 
     private void handleResponse(@NonNull Channel channel, Object msg) {
+        long startTime = System.nanoTime();
+
         Request request = null;
         try {
             if (!(msg instanceof FullHttpResponse)) {
@@ -172,6 +198,10 @@ final class HostManager extends Host {
             checkState(request != null, "received response on inactive channel?!?");
 
             this.activeRequests--; //decrement active requests counter to enable another request to be made
+
+            // Calculate network round-trip time
+            long networkDuration = System.nanoTime() - request.sendTime;
+            PerformanceTracker.trackOperation("HTTP Network Round-Trip", networkDuration);
 
             if (!HttpUtil.isKeepAlive(response)) { //response isn't keep-alive, close connection
                 //remove connection from active connections now to prevent it from
@@ -189,6 +219,9 @@ final class HostManager extends Host {
             ReferenceCountUtil.release(msg);
 
             this.tryWorkOffQueue(); //if this request is completed, another slot must have been freed up
+
+            long duration = System.nanoTime() - startTime;
+            PerformanceTracker.trackOperation("HTTP Response Handle", duration);
         }
     }
 
@@ -226,8 +259,10 @@ final class HostManager extends Host {
         protected final Callback callback;
         @NonNull
         protected final HttpHeaders headers;
+        protected long sendTime; // Add this field
 
         public HttpRequest toNetty() {
+            this.sendTime = System.nanoTime(); // Record when request is actually sent
             DefaultFullHttpRequest request = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.GET, this.path);
             request.headers()
                     .set(this.headers)
