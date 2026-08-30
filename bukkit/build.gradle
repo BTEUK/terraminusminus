@@ -15,7 +15,7 @@ evaluationDependsOn(':')
 
 dependencies {
 
-    shadowed project(path: ':', configuration: 'shadow')
+    api project(':')
     compileOnly "org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT"
     testImplementation "org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT"
 
@@ -27,7 +27,20 @@ publishing {
             groupId = project.group
             artifactId = "terraminusminus-bukkit"
             version = project.version
-            project.shadow.component(it)
+            from components.java
+
+            artifact shadowJar
+
+            pom.withXml {
+                def dependenciesNode = asNode().dependencies[0]
+                if (dependenciesNode) {
+                    dependenciesNode.children().findAll {
+                        it.artifactId.text() == 'terraminusminus-core'
+                    }.each {
+                        dependenciesNode.remove(it)
+                    }
+                }
+            }
         }
     }
 }

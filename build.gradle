@@ -1,21 +1,30 @@
 plugins {
-    id 'com.github.johnrengelman.shadow' version '8.1.1' apply false
+    id 'com.gradleup.shadow' version '8.3.0' apply false
 }
 
 allprojects {
     apply plugin: "java-library"
-    apply plugin: "com.github.johnrengelman.shadow"
+    apply plugin: "com.gradleup.shadow"
     apply plugin: "eclipse"
     apply plugin: "maven-publish"
 
-    configurations {
-        shadowed
-        compileOnly.extendsFrom(shadowed)
-        testImplementation.extendsFrom(shadowed)
-    }
 
     shadowJar {
-        configurations = [project.configurations.shadowed]
+        relocate 'com.fasterxml.jackson', 'net.buildtheearth.terraminusminus.dep.jackson'
+        relocate 'org.apache.commons.imaging', 'net.buildtheearth.terraminusminus.dep.commons.imaging'
+        relocate 'it.unimi.dsi.fastutil', 'net.buildtheearth.terraminusminus.dep.fastutil'
+        relocate 'net.daporkchop.lib', 'net.buildtheearth.terraminusminus.dep.porklib'
+
+        archiveClassifier.set('')
+
+        dependencies {
+            exclude(dependency('io.netty:.*'))
+            exclude(dependency('com.google.guava:.*'))
+            exclude(dependency('com.google.code.gson:.*'))
+            exclude(dependency('org.apache.logging.log4j:.*'))
+            exclude(dependency('org.projectlombok:lombok:.*'))
+            exclude(dependency('org.jetbrains:annotations:.*'))
+        }
     }
 
     compileJava {
@@ -96,7 +105,7 @@ dependencies {
 
     implementation "org.apache.commons:commons-imaging:1.0.0-alpha5"
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.19.2'
-    shadowed("net.daporkchop.lib:binary:0.5.7-SNAPSHOT")  {
+    implementation("net.daporkchop.lib:binary:0.5.7-SNAPSHOT")  {
         exclude group: "io.netty"
     }
     implementation "it.unimi.dsi:fastutil:8.5.16"
@@ -108,10 +117,13 @@ dependencies {
 
 }
 
+jar {
+    archiveClassifier.set('thin')
+}
+
 shadowJar {
     archiveClassifier.set('')
 }
-jar.enabled = false
 assemble.dependsOn shadowJar
 
 processResources {
@@ -131,7 +143,26 @@ publishing {
             groupId = project.group
             artifactId = "terraminusminus-core"
             version = project.version
-            project.shadow.component(it)
+            from components.java
+
+            // artifact shadowJar
+
+            pom.withXml {
+                def dependenciesNode = asNode().dependencies[0]
+                if (dependenciesNode) {
+                    def shadedArtifacts = [
+                            'commons-imaging',
+                            'jackson-databind',
+                            'binary',
+                            'fastutil'
+                    ]
+                    dependenciesNode.children().findAll {
+                        shadedArtifacts.contains(it.artifactId.text())
+                    }.each {
+                        dependenciesNode.remove(it)
+                    }
+                }
+            }
         }
     }
 }
