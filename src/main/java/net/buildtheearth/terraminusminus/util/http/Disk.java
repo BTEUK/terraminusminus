@@ -2,8 +2,6 @@ package net.buildtheearth.terraminusminus.util.http;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
-import io.netty.channel.DefaultEventLoop;
-import io.netty.channel.EventLoop;
 import io.netty.util.ReferenceCountUtil;
 import lombok.NonNull;
 import lombok.experimental.UtilityClass;
@@ -31,6 +29,8 @@ import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Stream;
@@ -44,7 +44,8 @@ import static net.daporkchop.lib.common.util.PValidation.*;
  */
 @UtilityClass
 public class Disk {
-    private final EventLoop DISK_EXECUTOR = new DefaultEventLoop(PThreadFactories.builder().daemon().minPriority().name("terra-- disk I/O thread").build());
+    private final ScheduledExecutorService DISK_EXECUTOR = new ScheduledThreadPoolExecutor(2, PThreadFactories.builder().daemon().minPriority().name("terra-- disk I/O thread").build());
+    private final ScheduledExecutorService PRUNE_EXECUTOR = new ScheduledThreadPoolExecutor(1, PThreadFactories.builder().daemon().minPriority().name("terra-- cache prune thread").build());
 
     private Path cacheRoot;
     private Path tmpFile;
@@ -97,7 +98,7 @@ public class Disk {
 
         // Periodically prune the cache
         TerraMinusMinus.LOGGER.info("Starting cache pruning schedule");
-        DISK_EXECUTOR.scheduleWithFixedDelay((IORunnable) Disk::pruneCache, 1L, 60L, TimeUnit.MINUTES);
+        PRUNE_EXECUTOR.scheduleWithFixedDelay((IORunnable) Disk::pruneCache, 1L, 60L, TimeUnit.MINUTES);
     }
 
     /**

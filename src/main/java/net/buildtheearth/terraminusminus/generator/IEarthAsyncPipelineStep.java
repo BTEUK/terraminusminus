@@ -44,7 +44,7 @@ public interface IEarthAsyncPipelineStep<D, V, B extends IEarthAsyncDataBuilder<
                     : futures;
 
             CompletableFuture<V> future = (nonNullFutures.length != 0 ? CompletableFuture.allOf(nonNullFutures) : CompletableFuture.completedFuture(null))
-                    .thenApply(unused -> {
+                    .thenApplyAsync(unused -> {
                         B builder = builderFactory.get();
 
                         for (int i = 0; i < steps.length; i++) {
