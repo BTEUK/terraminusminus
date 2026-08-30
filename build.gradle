@@ -131,7 +131,7 @@ publishing {
             groupId = project.group
             artifactId = "terraminusminus-core"
             version = project.version
-            from(components["java"])
+            project.shadow.component(it)
         }
     }
 }
@@ -144,9 +144,13 @@ tasks.register('delombok') {
     outputs.dir(outputDir)
     sourceSets.main.java.srcDirs.each {
         inputs.dir(it)
-        ant.taskdef(classname: 'lombok.delombok.ant.Tasks$Delombok', classpath: configurations.compileClasspath.asPath, name: 'delombok')
-        ant.mkdir(dir: outputDir)
-        ant.delombok(verbose: 'true', encoding: 'UTF-8', to: outputDir, from: it)
+    }
+    doLast {
+        sourceSets.main.java.srcDirs.each { dir ->
+            ant.taskdef(classname: 'lombok.delombok.ant.Tasks$Delombok', classpath: configurations.compileClasspath.asPath, name: 'delombok')
+            ant.mkdir(dir: outputDir)
+            ant.delombok(verbose: 'true', encoding: 'UTF-8', to: outputDir, from: dir, classpath: configurations.compileClasspath.asPath)
+        }
     }
 }
 

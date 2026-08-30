@@ -27,7 +27,7 @@ publishing {
             groupId = project.group
             artifactId = "terraminusminus-bukkit"
             version = project.version
-            from(components["java"])
+            project.shadow.component(it)
         }
     }
 }
