@@ -5,9 +5,17 @@ repositories {
     }
 }
 
+shadowJar {
+    archiveClassifier.set('')
+}
+jar.enabled = false
+assemble.dependsOn shadowJar
+
+evaluationDependsOn(':')
+
 dependencies {
 
-    api project(':')  // Root project
+    shadowed project(path: ':', configuration: 'shadow')
     compileOnly "org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT"
     testImplementation "org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT"
 
