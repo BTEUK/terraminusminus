@@ -35,6 +35,7 @@ import net.buildtheearth.terraminusminus.TerraConfig;
 import net.buildtheearth.terraminusminus.TerraConstants;
 import net.buildtheearth.terraminusminus.TerraMinusMinus;
 import net.daporkchop.lib.common.function.throwing.EFunction;
+import net.daporkchop.lib.common.misc.threadfactory.PThreadFactories;
 import net.daporkchop.lib.common.reference.cache.Cached;
 
 import javax.net.ssl.SSLException;
@@ -47,6 +48,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -64,6 +67,8 @@ import static net.daporkchop.lib.common.util.PValidation.*;
 @UtilityClass
 public class Http {
     protected static final long TIMEOUT = 20L;
+
+    public final ExecutorService EXECUTOR = Executors.newCachedThreadPool(PThreadFactories.builder().daemon().name("terra-- general thread").build());
 
     protected final EventLoopGroup NETWORK_EVENT_LOOP_GROUP;
 
@@ -418,7 +423,7 @@ public class Http {
                     } finally {
                         buf.release();
                     }
-                }));
+                }, EXECUTOR));
     }
 
     public static String formatUrl(@NonNull Map<String, String> properties, @NonNull String url) {

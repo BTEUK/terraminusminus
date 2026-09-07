@@ -20,6 +20,7 @@ import net.buildtheearth.terraminusminus.util.CornerBoundingBox2d;
 import net.buildtheearth.terraminusminus.util.bvh.BVH;
 import net.buildtheearth.terraminusminus.util.bvh.Bounds2d;
 import net.buildtheearth.terraminusminus.util.http.Disk;
+import net.buildtheearth.terraminusminus.util.http.Http;
 import net.daporkchop.lib.common.function.io.IOFunction;
 import net.daporkchop.lib.common.function.throwing.EFunction;
 
@@ -66,7 +67,7 @@ public class UserOverrideBiomeFilter implements IEarthBiomeFilter<UserOverrideBi
     public CompletableFuture<BiomeBoundingBox> requestData(ChunkPos pos, GeneratorDatasets datasets, Bounds2d bounds, CornerBoundingBox2d boundsGeo) throws OutOfProjectionBoundsException {
         return CompletableFuture.supplyAsync(() -> this.bvh.getAllIntersecting(boundsGeo).stream()
                 .max(Comparator.naturalOrder())
-                .orElse(null));
+                .orElse(null), Http.EXECUTOR);
     }
 
     @Override

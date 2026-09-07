@@ -16,6 +16,7 @@ import net.buildtheearth.terraminusminus.substitutes.ChunkPos;
 import net.buildtheearth.terraminusminus.util.CornerBoundingBox2d;
 import net.buildtheearth.terraminusminus.util.bvh.BVH;
 import net.buildtheearth.terraminusminus.util.bvh.Bounds2d;
+import net.buildtheearth.terraminusminus.util.http.Http;
 
 /**
  * @author DaPorkchop_
@@ -44,6 +45,6 @@ public class VectorTiledDataset extends TiledDataset<BVH<VectorGeometry>> implem
         return CompletableFuture.allOf(futures).thenApplyAsync(unused ->
                 uncheckedCast(Arrays.stream(futures)
                         .map(CompletableFuture::join)
-                        .toArray(BVH[]::new)));
+                        .toArray(BVH[]::new)), Http.EXECUTOR);
     }
 }

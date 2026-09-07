@@ -19,6 +19,7 @@ import net.buildtheearth.terraminusminus.substitutes.ChunkPos;
 import net.buildtheearth.terraminusminus.util.CornerBoundingBox2d;
 import net.buildtheearth.terraminusminus.util.IntToDoubleBiFunction;
 import net.buildtheearth.terraminusminus.util.bvh.Bounds2d;
+import net.buildtheearth.terraminusminus.util.http.Http;
 import net.daporkchop.lib.common.math.BinMath;
 
 import static net.daporkchop.lib.common.util.PValidation.*;
@@ -151,7 +152,7 @@ public abstract class DoubleTiledDataset extends TiledHttpDataset<double[]> impl
                                 return tile;
                             }))
                     .toArray(CompletableFuture[]::new))
-                    .thenApplyAsync(this);
+                    .thenApplyAsync(this, Http.EXECUTOR);
         }
     }
 }

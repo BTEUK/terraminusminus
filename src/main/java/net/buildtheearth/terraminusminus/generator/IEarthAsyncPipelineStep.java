@@ -11,6 +11,7 @@ import net.buildtheearth.terraminusminus.projection.OutOfProjectionBoundsExcepti
 import net.buildtheearth.terraminusminus.substitutes.ChunkPos;
 import net.buildtheearth.terraminusminus.util.CornerBoundingBox2d;
 import net.buildtheearth.terraminusminus.util.bvh.Bounds2d;
+import net.buildtheearth.terraminusminus.util.http.Http;
 
 import static net.daporkchop.lib.common.util.PorkUtil.*;
 
@@ -60,7 +61,7 @@ public interface IEarthAsyncPipelineStep<D, V, B extends IEarthAsyncDataBuilder<
                 }
             });
             return future;
-        }).thenCompose(Function.identity());
+        }, Http.EXECUTOR).thenCompose(Function.identity());
     }
 
     /**

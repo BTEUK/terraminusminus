@@ -8,6 +8,7 @@ import lombok.NonNull;
 import net.buildtheearth.terraminusminus.dataset.IScalarDataset;
 import net.buildtheearth.terraminusminus.projection.OutOfProjectionBoundsException;
 import net.buildtheearth.terraminusminus.util.CornerBoundingBox2d;
+import net.buildtheearth.terraminusminus.util.http.Http;
 
 /**
  * Abstract implementation of {@link IScalarDataset} for the builtin datasets.
@@ -58,7 +59,7 @@ public abstract class AbstractBuiltinDataset implements IScalarDataset {
             }
 
             return out;
-        });
+        }, Http.EXECUTOR);
     }
 
     protected abstract double get(double x, double y);
