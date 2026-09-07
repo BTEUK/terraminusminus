@@ -24,6 +24,9 @@ allprojects {
             name = "DaPorkchop_"
             url = "https://maven.daporkchop.net/"
         }
+        maven {
+            url = "https://maven.buildtheearth.net/releases"
+        }
     }
 
     java {
@@ -81,7 +84,7 @@ dependencies {
 
     implementation "org.apache.commons:commons-imaging:1.0.0-alpha5"
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.19.2'
-    implementation("net.daporkchop.lib:binary:0.5.7-SNAPSHOT")  {
+    implementation("net.daporkchop.lib:binary:0.5.7")  {
         exclude group: "io.netty"
     }
     implementation "it.unimi.dsi:fastutil:8.5.16"
