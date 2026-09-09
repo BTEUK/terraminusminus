@@ -458,6 +458,22 @@ public class Http {
         }
     }
 
+    /**
+     * Shuts down the Netty event loop group.
+     */
+    public void terminate() {
+        NETWORK_EVENT_LOOP_GROUP.shutdownGracefully();
+        EXECUTOR.shutdown();
+        try {
+            if (!EXECUTOR.awaitTermination(5, TimeUnit.SECONDS)) {
+                EXECUTOR.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            EXECUTOR.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+
     protected <T> void copyResultTo(@NonNull CompletableFuture<T> src, @NonNull CompletableFuture<T> dst) {
         src.whenComplete((v, t) -> {
             if (t != null) {

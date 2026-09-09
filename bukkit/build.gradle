@@ -1,17 +1,41 @@
+plugins {
+    id 'com.gradleup.shadow' version '8.3.5'
+}
+
 repositories {
-    maven { // For bukkit api bindings
-        name = "SpigotMC"
-        url = "https://hub.spigotmc.org/nexus/content/repositories/snapshots/"
+    mavenCentral()
+    maven {
+        url = uri("https://repo.papermc.io/repository/maven-public/")
     }
 }
 
 dependencies {
 
-    api project(':')  // Root project
-    compileOnly "org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT"
-    testImplementation "org.spigotmc:spigot-api:1.21.8-R0.1-SNAPSHOT"
+    implementation project(':')  // Root project
+    compileOnly "io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT"
+    testImplementation "io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT"
 
 }
+
+shadowJar {
+    relocate 'io.netty', 'net.buildtheearth.terraminusminus.shaded.io.netty'
+
+    dependencies {
+        include(dependency('io.netty:.*'))
+        include(project(':'))
+    }
+
+    archiveClassifier.set('')
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("paper-plugin.yml") {
+        expand 'version': project.version
+    }
+}
+
+tasks.assemble.dependsOn shadowJar
 
 publishing {
     publications {
@@ -19,7 +43,7 @@ publishing {
             groupId = project.group
             artifactId = "terraminusminus-bukkit"
             version = project.version
-            from(components["java"])
+            project.shadow.component(it)
         }
     }
 }

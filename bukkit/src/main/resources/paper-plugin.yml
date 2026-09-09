@@ -1,0 +1,16 @@
+name: terraminusminus
+version: '${version}'
+main: net.buildtheearth.terraminusminus.TerraminusminusPlugin
+api-version: '26.2'
+load: STARTUP
+description: "Paper plugin version of the terraminusminus library."
+authors: [DaPorkchop_, Smyler, ELgamer]
+website: https://github.com/BuildTheEarth/terraminusminus
+
+libraries:
+  - org.apache.commons:commons-imaging:1.0.0-alpha5
+  - com.fasterxml.jackson.core:jackson-databind:2.19.2
+  - net.daporkchop.lib:binary:0.5.7
+  - it.unimi.dsi:fastutil:8.5.16
+  - com.google.code.gson:gson:2.11.0
+  - com.google.guava:guava:33.3.1-jre
