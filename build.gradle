@@ -4,8 +4,8 @@ allprojects {
     apply plugin: "maven-publish"
 
     compileJava {
-        sourceCompatibility = "8"
-        targetCompatibility = "21"
+        sourceCompatibility = "25"
+        targetCompatibility = "25"
     }
 
     var git_tag = 'git describe --tags --exact-match'.execute().text.trim().replace('/', '-')
@@ -36,8 +36,8 @@ allprojects {
 
     dependencies {
         // Annotations
-        compileOnly "org.projectlombok:lombok:1.18.38"
-        annotationProcessor "org.projectlombok:lombok:1.18.38"
+        compileOnly "org.projectlombok:lombok:1.18.46"
+        annotationProcessor "org.projectlombok:lombok:1.18.46"
         compileOnly 'org.jetbrains:annotations:26.0.2'
 
         // Tests
