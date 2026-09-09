@@ -1,0 +1,19 @@
+{
+  "repositories": {
+    "google_central_proxy": "https://maven-central.storage-download.googleapis.com/maven2",
+    "eldonexus_central_proxy": "https://eldonexus.de/repository/maven-public/",
+    "papermc": "https://repo.papermc.io/repository/maven-public/",
+    "DaPorkchop_": "https://maven.daporkchop.net/",
+    "BTE": "https://maven.buildtheearth.net/releases"
+  },
+  "dependencies": [
+    "org.apache.commons:commons-imaging:1.0.0-alpha5",
+    "com.fasterxml.jackson.core:jackson-annotations:2.19.2",
+    "com.fasterxml.jackson.core:jackson-core:2.19.2",
+    "com.fasterxml.jackson.core:jackson-databind:2.19.2",
+    "net.daporkchop.lib:binary:0.5.7",
+    "it.unimi.dsi:fastutil:8.5.16",
+    "com.google.code.gson:gson:2.11.0",
+    "com.google.guava:guava:33.3.1-jre"
+  ]
+}
