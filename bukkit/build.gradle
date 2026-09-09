@@ -12,7 +12,7 @@ repositories {
 dependencies {
 
     implementation project(':')  // Root project
-    compileOnly "io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT"
+    compileOnly "io.papermc.paper:paper-api:26.2.build.+"
     testImplementation "io.papermc.paper:paper-api:1.21.1-R0.1-SNAPSHOT"
 
 }
