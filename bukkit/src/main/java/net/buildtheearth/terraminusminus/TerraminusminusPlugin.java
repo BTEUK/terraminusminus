@@ -21,11 +21,4 @@ public class TerraminusminusPlugin extends JavaPlugin {
 
         getLogger().info("Terraminusminus plugin enabled!");
     }
-
-    @Override
-    public void onDisable() {
-        // Shutdown Netty event loop
-        Http.terminate();
-        getLogger().info("Terraminusminus plugin disabled!");
-    }
 }

@@ -74,10 +74,10 @@ public class Http {
 
     static {
         //create a dedicated eventloop with one thread
-        ThreadFactory threadFactory = new DefaultThreadFactory("terra-- HTTP network thread", true, Thread.MIN_PRIORITY);
+        ThreadFactory threadFactory = new DefaultThreadFactory("terra-- HTTP network thread", true, Thread.NORM_PRIORITY);
         NETWORK_EVENT_LOOP_GROUP = Epoll.isAvailable()
-                ? new EpollEventLoopGroup(1, threadFactory)
-                : new NioEventLoopGroup(1, threadFactory);
+                ? new EpollEventLoopGroup(4, threadFactory)
+                : new NioEventLoopGroup(4, threadFactory);
     }
 
     protected final Bootstrap DEFAULT_BOOTSTRAP = new Bootstrap()
@@ -455,22 +455,6 @@ public class Http {
             } else {
                 TerraMinusMinus.LOGGER.warn("Invalid entry: \"{}\"", entry);
             }
-        }
-    }
-
-    /**
-     * Shuts down the Netty event loop group.
-     */
-    public void terminate() {
-        NETWORK_EVENT_LOOP_GROUP.shutdownGracefully();
-        EXECUTOR.shutdown();
-        try {
-            if (!EXECUTOR.awaitTermination(5, TimeUnit.SECONDS)) {
-                EXECUTOR.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            EXECUTOR.shutdownNow();
-            Thread.currentThread().interrupt();
         }
     }
 
