@@ -50,6 +50,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
@@ -69,6 +70,8 @@ public class Http {
     protected static final long TIMEOUT = 20L;
 
     public final ExecutorService EXECUTOR = Executors.newCachedThreadPool(PThreadFactories.builder().daemon().name("terra-- general thread").build());
+
+    public final ScheduledExecutorService FIXED_EXECUTOR = Executors.newSingleThreadScheduledExecutor();
 
     protected final EventLoopGroup NETWORK_EVENT_LOOP_GROUP;
 
@@ -92,6 +95,8 @@ public class Http {
 
     protected final Map<Host, HostManager> MANAGERS = new ConcurrentHashMap<>();
 
+    protected final Map<String, CompletableFuture<ByteBuf>> IN_FLIGHT = new ConcurrentHashMap<>();
+
     protected final int MAX_CONTENT_LENGTH = Integer.MAX_VALUE; //impossibly large, no requests will actually be this big but whatever
 
     protected static final Cached<Matcher> URL_FORMATTING_MATCHER_CACHE = Cached.regex(Pattern.compile("\\$\\{([a-z0-9.]+)}"));
@@ -112,6 +117,25 @@ public class Http {
     @Getter @Setter
     private static String userAgent = fastFormat("%s/%s", TerraConstants.LIB_NAME, TerraConstants.LIB_VERSION);
 
+    private static final boolean DEBUG_HTTP = true; // set to false when done debugging, or gate behind a config
+
+    private static void debug(String msg, Object... args) {
+        if (DEBUG_HTTP && !TerraConfig.reducedConsoleMessages) {
+            TerraMinusMinus.LOGGER.info("[Http-Debug] " + msg, args);
+        }
+    }
+
+    static {
+        if (DEBUG_HTTP) {
+            FIXED_EXECUTOR.scheduleAtFixedRate(() -> {
+                if (!IN_FLIGHT.isEmpty()) {
+                    TerraMinusMinus.LOGGER.info("[Http-Debug] Currently in-flight requests ({}):", IN_FLIGHT.size());
+                    IN_FLIGHT.keySet().forEach(u -> TerraMinusMinus.LOGGER.info("  - {}", u));
+                }
+            }, 30, 30, TimeUnit.SECONDS);
+        }
+    }
+
     private HostManager managerFor(@NonNull URL url) {
         return MANAGERS.computeIfAbsent(new Host(url), HostManager::new);
     }
@@ -124,193 +148,237 @@ public class Http {
      * @return a {@link CompletableFuture} which will be completed with the resource data, or {@code null} if the resource isn't found
      */
     public CompletableFuture<ByteBuf> get(@NonNull String url, @NonNull RequestOptions options) {
-        CompletableFuture<ByteBuf> future = new CompletableFuture<>();
+        long startNanos = System.nanoTime();
+        debug("get() start: {}", url);
 
-        class State implements BiConsumer<ByteBuf, Throwable>, HostManager.Callback {
-            URL parsed;
-            Path cacheFile;
+        boolean[] wasPresent = { true };
+        CompletableFuture<ByteBuf> result = IN_FLIGHT.computeIfAbsent(url, u -> {
+            wasPresent[0] = false;
 
-            CacheEntry cacheEntry;
-            ByteBuf cachedData;
-            HttpHeaders nextHeaders = EmptyHttpHeaders.INSTANCE;
+            CompletableFuture<ByteBuf> future = new CompletableFuture<>();
 
-            @Override
-            public synchronized boolean isCancelled() {
-                return future.isDone();
-            }
+            // Log when the future finally completes (this is the most useful log for hangs)
+            future.whenComplete((buf, t) -> {
+                long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+                if (t != null) {
+                    debug("future COMPLETED EXCEPTIONALLY after {} ms: {} → {}", elapsedMs, url, t.toString());
+                } else if (buf == null) {
+                    debug("future COMPLETED with null (404 / not found) after {} ms: {}", elapsedMs, url);
+                } else {
+                    debug("future COMPLETED successfully after {} ms ({} bytes): {}", elapsedMs, buf.readableBytes(), url);
+                }
+            });
 
-            @Override
-            public synchronized void accept(ByteBuf cachedData, Throwable throwable) { //stage 1: handle value from cache
-                checkState(options.readFromCache, "readFromCache is disabled, so how did we get here?!?");
+            class State implements BiConsumer<ByteBuf, Throwable>, HostManager.Callback {
+                URL parsed;
+                Path cacheFile;
 
-                if (throwable != null) {
-                    TerraMinusMinus.LOGGER.error("Unable to read cache for " + this.parsed, throwable);
+                CacheEntry cacheEntry;
+                ByteBuf cachedData;
+                HttpHeaders nextHeaders = EmptyHttpHeaders.INSTANCE;
+
+                @Override
+                public synchronized boolean isCancelled() {
+                    return future.isDone();
                 }
 
-                try {
-                    if (cachedData != null //we found something in the cache
-                        && cachedData.readByte() == CacheEntry.CACHE_VERSION) { //cache file isn't old...
-                        CacheEntry cacheEntry = new CacheEntry(cachedData);
+                @Override
+                public synchronized void accept(ByteBuf cachedData, Throwable throwable) { //stage 1: handle value from cache
+                    checkState(options.readFromCache, "readFromCache is disabled, so how did we get here?!?");
 
-                        long now = System.currentTimeMillis();
-                        if (cacheEntry.isStale(now)) { //attempt to revalidate response data
-                            if (!TerraConfig.reducedConsoleMessages) {
-                                TerraMinusMinus.LOGGER.info("Cache stale: {}", this.parsed);
-                            }
-
-                            this.cacheEntry = cacheEntry;
-                            this.cachedData = cachedData.retain();
-                            cacheEntry.touch(this.nextHeaders = new DefaultHttpHeaders());
-                        } else if (cacheEntry.isExpired(now)) { //discard data and pretend it doesn't exist
-                            if (!TerraConfig.reducedConsoleMessages) {
-                                TerraMinusMinus.LOGGER.info("Cache expired: {}", this.parsed);
-                            }
-                        } else { //return cached response value
-                            if (!TerraConfig.reducedConsoleMessages) {
-                                TerraMinusMinus.LOGGER.info("Cache hit: {}", this.parsed);
-                            }
-                            this.handleCacheEntry(cacheEntry, cachedData);
-                            return;
-                        }
-                    } else {
-                        if (!TerraConfig.reducedConsoleMessages) {
-                            TerraMinusMinus.LOGGER.info("Cache miss: {}", this.parsed);
-                        }
-                    }
-                } catch (Exception e) {
-                    TerraMinusMinus.LOGGER.error("Unable to read cache for " + this.parsed, e);
-                } finally {
-                    ReferenceCountUtil.release(cachedData);
-                }
-
-                //cache miss, send the actual request
-                managerFor(this.parsed).submit(this.parsed.getFile(), this, this.nextHeaders);
-                this.nextHeaders = EmptyHttpHeaders.INSTANCE;
-            }
-
-            void handleCacheEntry(@NonNull CacheEntry cacheEntry, @NonNull ByteBuf cachedData) {
-                switch (cacheEntry.status) {
-                    case CacheEntry.STATUS_NOT_FOUND: //404 Not Found
-                        future.complete(null);
-                        return;
-                    case CacheEntry.STATUS_SUCCESS: //2xx
-                        future.complete(cachedData.retain());
-                        return;
-                    case CacheEntry.STATUS_REDIRECT: //redirect
-                        checkState(options.followRedirects, "don't know how to handle an HTTP redirect when followRedirects is disabled!");
-                        this.step(cacheEntry.location);
-                        return;
-                    default:
-                        throw new IllegalArgumentException("invalid status: " + cacheEntry.status);
-                }
-            }
-
-            void releaseCacheEntry() {
-                if (this.cacheEntry != null) { //release data
-                    this.cacheEntry = null;
-                    this.cachedData.release();
-                    this.cachedData = null;
-                }
-            }
-
-            @Override
-            public synchronized void handle(FullHttpResponse response, Throwable throwable) { //stage 2: handle HTTP response
-                try {
-                    //if cacheEntry is non-null, it means we're currently attempting to refresh a stale entry
+                    debug("cache stage for {}: cachedData={}, throwable={}", this.parsed, cachedData != null, throwable != null);
 
                     if (throwable != null) {
-                        if (this.cacheEntry != null) { //fall back to stale cache data
-                            if (!TerraConfig.reducedConsoleMessages) {
-                                TerraMinusMinus.LOGGER.warn("Refresh failed, falling back to stale data in cache: {}", this.parsed);
+                        TerraMinusMinus.LOGGER.error("Unable to read cache for " + this.parsed, throwable);
+                    }
+
+                    try {
+                        if (cachedData != null //we found something in the cache
+                            && cachedData.readByte() == CacheEntry.CACHE_VERSION) { //cache file isn't old...
+                            CacheEntry cacheEntry = new CacheEntry(cachedData);
+
+                            long now = System.currentTimeMillis();
+                            if (cacheEntry.isStale(now)) { //attempt to revalidate response data
+                                if (!TerraConfig.reducedConsoleMessages) {
+                                    TerraMinusMinus.LOGGER.info("Cache stale: {}", this.parsed);
+                                }
+
+                                this.cacheEntry = cacheEntry;
+                                this.cachedData = cachedData.retain();
+                                cacheEntry.touch(this.nextHeaders = new DefaultHttpHeaders());
+                            } else if (cacheEntry.isExpired(now)) { //discard data and pretend it doesn't exist
+                                if (!TerraConfig.reducedConsoleMessages) {
+                                    TerraMinusMinus.LOGGER.info("Cache expired: {}", this.parsed);
+                                }
+                            } else { //return cached response value
+                                if (!TerraConfig.reducedConsoleMessages) {
+                                    TerraMinusMinus.LOGGER.info("Cache hit: {}", this.parsed);
+                                }
+                                this.handleCacheEntry(cacheEntry, cachedData);
+                                return;
                             }
-                            this.handleCacheEntry(this.cacheEntry, this.cachedData);
                         } else {
                             if (!TerraConfig.reducedConsoleMessages) {
-                                TerraMinusMinus.LOGGER.warn("Request failed: {}", this.parsed);
+                                TerraMinusMinus.LOGGER.info("Cache miss: {}", this.parsed);
                             }
-                            future.completeExceptionally(throwable);
                         }
+                    } catch (Exception e) {
+                        TerraMinusMinus.LOGGER.error("Unable to read cache for " + this.parsed, e);
+                    } finally {
+                        ReferenceCountUtil.release(cachedData);
+                    }
+
+                    //cache miss, send the actual request
+                    managerFor(this.parsed).submit(this.parsed.getFile(), this, this.nextHeaders);
+                    this.nextHeaders = EmptyHttpHeaders.INSTANCE;
+                }
+
+                void handleCacheEntry(@NonNull CacheEntry cacheEntry, @NonNull ByteBuf cachedData) {
+                    switch (cacheEntry.status) {
+                        case CacheEntry.STATUS_NOT_FOUND: //404 Not Found
+                            future.complete(null);
+                            return;
+                        case CacheEntry.STATUS_SUCCESS: //2xx
+                            future.complete(cachedData.retain());
+                            return;
+                        case CacheEntry.STATUS_REDIRECT: //redirect
+                            checkState(options.followRedirects, "don't know how to handle an HTTP redirect when followRedirects is disabled!");
+                            this.step(cacheEntry.location);
+                            return;
+                        default:
+                            throw new IllegalArgumentException("invalid status: " + cacheEntry.status);
+                    }
+                }
+
+                void releaseCacheEntry() {
+                    if (this.cacheEntry != null) { //release data
+                        this.cacheEntry = null;
+                        this.cachedData.release();
+                        this.cachedData = null;
+                    }
+                }
+
+                @Override
+                public synchronized void handle(FullHttpResponse response, Throwable throwable) { //stage 2: handle HTTP response
+                    if (throwable != null) {
+                        debug("HTTP stage FAILED for {}: {}", this.parsed, throwable.toString());
+                    } else {
+                        debug("HTTP stage received response for {}: status={}", this.parsed, response.status());
+                    }
+
+                    try {
+                        //if cacheEntry is non-null, it means we're currently attempting to refresh a stale entry
+
+                        if (throwable != null) {
+                            if (this.cacheEntry != null) { //fall back to stale cache data
+                                if (!TerraConfig.reducedConsoleMessages) {
+                                    TerraMinusMinus.LOGGER.warn("Refresh failed, falling back to stale data in cache: {}", this.parsed);
+                                }
+                                this.handleCacheEntry(this.cacheEntry, this.cachedData);
+                            } else {
+                                if (!TerraConfig.reducedConsoleMessages) {
+                                    TerraMinusMinus.LOGGER.warn("Request failed: {}", this.parsed);
+                                }
+                                future.completeExceptionally(throwable);
+                            }
+                            return;
+                        }
+                        //attempt to parse cache entry
+                        CacheEntry cacheEntry = new CacheEntry(response, this.parsed);
+
+                        if (!TerraConfig.reducedConsoleMessages) {
+                            TerraMinusMinus.LOGGER.info(this.cacheEntry != null ? cacheEntry.status == CacheEntry.STATUS_NOT_MODIFIED
+                                    ? "Refresh succeeded, data in cache not modified: {}"
+                                    : "Refresh succeeded, updating data in cache: {}"
+                                    : "Request succeeded: {}", this.parsed);
+                        }
+
+                        //copy the response body because it's a composite buffer by default, which is slow for random access
+                        ByteBuf copiedBuffer;
+                        if (cacheEntry.status == CacheEntry.STATUS_NOT_MODIFIED) {
+                            checkState(this.cacheEntry != null, "not modified for unknown URL: %s", this.parsed);
+                            cacheEntry = cacheEntry.withStatus(this.cacheEntry.status);
+                            copiedBuffer = this.cachedData.retain();
+                        } else {
+                            copiedBuffer = response.content().copy();
+                        }
+                        try {
+                            ByteBuf cacheEntryBuffer = UnpooledByteBufAllocator.DEFAULT.ioBuffer();
+                            cacheEntryBuffer.writeByte(CacheEntry.CACHE_VERSION);
+                            cacheEntry.write(cacheEntryBuffer);
+
+                            ByteBuf toCacheData = UnpooledByteBufAllocator.DEFAULT.compositeBuffer(2)
+                                    .addComponent(true, cacheEntryBuffer)
+                                    .addComponent(true, copiedBuffer.retainedSlice());
+                            if (options.writeToCache && !cacheEntry.noCache && this.cacheFile != null) { //store in cache
+                                Disk.write(this.cacheFile, toCacheData);
+                            } else { //manually release the data that would have been written to cache
+                                toCacheData.release();
+                            }
+
+                            this.handleCacheEntry(cacheEntry, copiedBuffer);
+                        } finally {
+                            copiedBuffer.release();
+                        }
+                    } catch (Exception e) {
+                        future.completeExceptionally(e);
+                    } finally {
+                        this.releaseCacheEntry();
+                    }
+                }
+
+                synchronized void step(@NonNull String url) {
+                    try {
+                        this.parsed = new URL(url);
+                    } catch (MalformedURLException e) {
+                        throw new IllegalArgumentException(url, e);
+                    }
+
+                    if ("file".equalsIgnoreCase(this.parsed.getProtocol())) { //it's a file, read from disk (also async)
+                        Path path = Paths.get(url.substring("file://".length()));
+                        debug("step → file read: {}", path);
+                        if (!TerraConfig.reducedConsoleMessages) {
+                            future.whenComplete((data, t) -> {
+                                if (t != null) {
+                                    TerraMinusMinus.LOGGER.error("Failed to read file: " + path, t);
+                                } else if (data != null) {
+                                    TerraMinusMinus.LOGGER.info("Read file: {}", path);
+                                } else {
+                                    TerraMinusMinus.LOGGER.info("File not found: {}", path);
+                                }
+                            });
+                        }
+                        copyResultTo(Disk.read(path), future);
                         return;
                     }
-                    //attempt to parse cache entry
-                    CacheEntry cacheEntry = new CacheEntry(response, this.parsed);
 
-                    if (!TerraConfig.reducedConsoleMessages) {
-                        TerraMinusMinus.LOGGER.info(this.cacheEntry != null ? cacheEntry.status == CacheEntry.STATUS_NOT_MODIFIED
-                                ? "Refresh succeeded, data in cache not modified: {}"
-                                : "Refresh succeeded, updating data in cache: {}"
-                                : "Request succeeded: {}", this.parsed);
+                    if (options.readFromCache) { //attempt to read from cache
+                        this.cacheFile = Disk.cacheFileFor(this.parsed.toString());
+                        debug("step → cache read: {}", this.cacheFile);
+                        Disk.read(this.cacheFile).whenComplete(this);
+                    } else { //send the actual request
+                        debug("step → network submit (no cache): {}", this.parsed);
+                        managerFor(this.parsed).submit(this.parsed.getFile(), this, this.nextHeaders);
                     }
-
-                    //copy the response body because it's a composite buffer by default, which is slow for random access
-                    ByteBuf copiedBuffer;
-                    if (cacheEntry.status == CacheEntry.STATUS_NOT_MODIFIED) {
-                        checkState(this.cacheEntry != null, "not modified for unknown URL: %s", this.parsed);
-                        cacheEntry = cacheEntry.withStatus(this.cacheEntry.status);
-                        copiedBuffer = this.cachedData.retain();
-                    } else {
-                        copiedBuffer = response.content().copy();
-                    }
-                    try {
-                        ByteBuf cacheEntryBuffer = UnpooledByteBufAllocator.DEFAULT.ioBuffer();
-                        cacheEntryBuffer.writeByte(CacheEntry.CACHE_VERSION);
-                        cacheEntry.write(cacheEntryBuffer);
-
-                        ByteBuf toCacheData = UnpooledByteBufAllocator.DEFAULT.compositeBuffer(2)
-                                .addComponent(true, cacheEntryBuffer)
-                                .addComponent(true, copiedBuffer.retainedSlice());
-                        if (options.writeToCache && !cacheEntry.noCache && this.cacheFile != null) { //store in cache
-                            Disk.write(this.cacheFile, toCacheData);
-                        } else { //manually release the data that would have been written to cache
-                            toCacheData.release();
-                        }
-
-                        this.handleCacheEntry(cacheEntry, copiedBuffer);
-                    } finally {
-                        copiedBuffer.release();
-                    }
-                } catch (Exception e) {
-                    future.completeExceptionally(e);
-                } finally {
-                    this.releaseCacheEntry();
                 }
             }
 
-            synchronized void step(@NonNull String url) {
-                try {
-                    this.parsed = new URL(url);
-                } catch (MalformedURLException e) {
-                    throw new IllegalArgumentException(url, e);
-                }
+            new State().step(u);
+            return future;
+        });
 
-                if ("file".equalsIgnoreCase(this.parsed.getProtocol())) { //it's a file, read from disk (also async)
-                    Path path = Paths.get(url.substring("file://".length()));
-                    if (!TerraConfig.reducedConsoleMessages) {
-                        future.whenComplete((data, t) -> {
-                            if (t != null) {
-                                TerraMinusMinus.LOGGER.error("Failed to read file: " + path, t);
-                            } else if (data != null) {
-                                TerraMinusMinus.LOGGER.info("Read file: {}", path);
-                            } else {
-                                TerraMinusMinus.LOGGER.info("File not found: {}", path);
-                            }
-                        });
-                    }
-                    copyResultTo(Disk.read(path), future);
-                    return;
-                }
-
-                if (options.readFromCache) { //attempt to read from cache
-                    this.cacheFile = Disk.cacheFileFor(this.parsed.toString());
-                    Disk.read(this.cacheFile).whenComplete(this);
-                } else { //send the actual request
-                    managerFor(this.parsed).submit(this.parsed.getFile(), this, this.nextHeaders);
-                }
+        if (wasPresent[0]) {
+            if (!TerraConfig.reducedConsoleMessages) {
+                debug("Reusing already in-flight request: {}", url);
             }
+        } else {
+            result.whenComplete((_, _) -> {
+                IN_FLIGHT.remove(url, result);
+                debug("removed from IN_FLIGHT: {}", url);
+            });
         }
 
-        new State().step(url);
-        return future;
+        return result.thenApply(buf -> buf == null ? null : buf.retainedDuplicate());
     }
 
     /**

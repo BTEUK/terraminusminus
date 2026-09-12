@@ -148,6 +148,7 @@ final class HostManager extends Host {
         if (this.channels.remove(channel)) {
             Request request = channel.attr(ATTR_REQUEST).getAndSet(null);
             if (request != null) {
+                this.activeRequests--;
                 //the channel still has a request associated with it! the channel was a keepalive channel,
                 // and the server closed it at the same time as we sent the request. let's re-submit the request
                 // so that it can be issued again on a new channel
@@ -172,9 +173,13 @@ final class HostManager extends Host {
             }
 
             request = channel.attr(ATTR_REQUEST).getAndSet(null);
+            if (request != null) {
+                this.activeRequests--; //decrement active requests counter to enable another request to be made
+                if (channel.pipeline().get("read_timeout") != null) {
+                    channel.pipeline().remove("read_timeout");
+                }
+            }
             checkState(request != null, "received response on inactive channel?!?");
-
-            this.activeRequests--; //decrement active requests counter to enable another request to be made
 
             if (!HttpUtil.isKeepAlive(response)) { //response isn't keep-alive, close connection
                 //remove connection from active connections now to prevent it from
@@ -275,13 +280,12 @@ final class HostManager extends Host {
     @ChannelHandler.Sharable
     private final class Handler extends ChannelInboundHandlerAdapter {
         @Override
-        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-            ctx.pipeline().remove("read_timeout"); //remove read timeout listener to prevent a fake timeout if the connection is idle
+        public void channelRead(ChannelHandlerContext ctx, Object msg) {
             HostManager.this.handleResponse(ctx.channel(), msg);
         }
 
         @Override
-        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
             Request request = ctx.channel().attr(ATTR_REQUEST).getAndSet(null);
             if (request != null) { //inform request that it failed
                 request.callback.handle(null, cause);

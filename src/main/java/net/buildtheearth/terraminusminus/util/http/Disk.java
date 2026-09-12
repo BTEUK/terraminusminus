@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -31,6 +32,8 @@ import java.nio.file.attribute.FileTime;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Stream;
@@ -45,6 +48,7 @@ import static net.daporkchop.lib.common.util.PValidation.*;
 @UtilityClass
 public class Disk {
     private final EventLoop DISK_EXECUTOR = new DefaultEventLoop(PThreadFactories.builder().daemon().minPriority().name("terra-- disk I/O thread").build());
+    private final ScheduledExecutorService PRUNER_EXECUTOR = Executors.newSingleThreadScheduledExecutor(PThreadFactories.builder().daemon().minPriority().name("terra-- cache pruner").build());
 
     private Path cacheRoot;
     private Path tmpFile;
@@ -97,7 +101,7 @@ public class Disk {
 
         // Periodically prune the cache
         TerraMinusMinus.LOGGER.info("Starting cache pruning schedule");
-        DISK_EXECUTOR.scheduleWithFixedDelay((IORunnable) Disk::pruneCache, 1L, 60L, TimeUnit.MINUTES);
+        PRUNER_EXECUTOR.scheduleWithFixedDelay(Disk::pruneCache, 1L, 60L, TimeUnit.MINUTES);
     }
 
     /**
@@ -138,7 +142,12 @@ public class Disk {
                 try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ)) {
                     int size = toInt(channel.size(), "file size");
                     buf = ByteBufAllocator.DEFAULT.ioBuffer(size, size);
-                    for (int i = 0; i < size; i += buf.writeBytes(channel, i, size - i)) {
+                    for (int i = 0; i < size; ) {
+                        int read = buf.writeBytes(channel, i, size - i);
+                        if (read <= 0) {
+                            throw new IOException("EOF or no progress reading file: " + file);
+                        }
+                        i += read;
                     }
                     return buf.retain();
                 } finally {
@@ -161,7 +170,10 @@ public class Disk {
             try {
                 try (FileChannel channel = FileChannel.open(tmpFile(), StandardOpenOption.WRITE, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
                     while (data.isReadable()) {
-                        data.readBytes(channel, data.readableBytes());
+                        int written = data.readBytes(channel, data.readableBytes());
+                        if (written <= 0) {
+                            throw new IOException("no progress writing to file: " + tmpFile());
+                        }
                     }
                 }
 
@@ -199,7 +211,7 @@ public class Disk {
         return configRoot().resolve(name);
     }
 
-    private void pruneCache() throws IOException {
+    private void pruneCache() {
         if (!TerraConfig.reducedConsoleMessages) {
             TerraMinusMinus.LOGGER.info("running cache cleanup...");
         }
@@ -209,35 +221,36 @@ public class Disk {
 
         long now = System.currentTimeMillis();
 
-        try (Stream<Path> stream = Files.list(cacheRoot())) {
-            stream.filter(Files::isRegularFile)
-                    .filter((IOPredicate<Path>) p -> {
-                        try (FileChannel channel = FileChannel.open(p, StandardOpenOption.READ)) {
-                            long chSize = channel.size();
-                            try {
-                                ByteBuf buf = PUnpooled.wrap(channel.map(FileChannel.MapMode.READ_ONLY, 0L, chSize), toInt(chSize), true);
-                                try {
-                                    if (buf.readByte() == CacheEntry.CACHE_VERSION && !new CacheEntry(buf).isExpired(now)) { //file isn't expired, skip it
-                                        return false;
-                                    }
-                                } finally {
-                                    buf.release();
-                                }
-                            } catch (Throwable ignored) {
-                                //no-op
-                            }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(cacheRoot())) {
+            for (Path p : stream) {
+                try {
+                    if (!Files.isRegularFile(p)) continue;
 
-                            //delete file
-                            count.increment();
-                            size.add(chSize);
-                            return true;
+                    long chSize = Files.size(p);
+                    boolean shouldDelete = false;
+                    try (FileChannel channel = FileChannel.open(p, StandardOpenOption.READ)) {
+                        long sizeL = channel.size();
+                        ByteBuf buf = PUnpooled.wrap(channel.map(FileChannel.MapMode.READ_ONLY, 0L, sizeL), toInt(sizeL), true);
+                        try {
+                            if (buf.readByte() != CacheEntry.CACHE_VERSION || new CacheEntry(buf).isExpired(now)) {
+                                shouldDelete = true;
+                            }
+                        } finally {
+                            buf.release();
                         }
-                    })
-                    .peek((IOConsumer<Path>) path -> {
+                    } catch (Throwable t) {
+                        shouldDelete = true; // Delete corrupted or unreadable files
+                    }
+
+                    if (shouldDelete) {
+                        Files.delete(p);
                         count.increment();
-                        size.add(Files.size(path));
-                    })
-                    .forEach((IOConsumer<Path>) Files::delete);
+                        size.add(chSize);
+                    }
+                } catch (Throwable t) {
+                    // Ignore error for individual file
+                }
+            }
         } catch (Throwable e) {
             TerraMinusMinus.LOGGER.error("exception occurred during cache cleanup!", e);
         } finally {

@@ -1,10 +1,10 @@
 package net.buildtheearth.terraminusminus;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TerraMinusMinus {
-	
-    public static final Logger LOGGER = LogManager.getLogger("terra--");
+
+    public static Logger LOGGER = LoggerFactory.getLogger("terra--");
 
 }

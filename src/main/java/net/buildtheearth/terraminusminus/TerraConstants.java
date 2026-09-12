@@ -35,8 +35,7 @@ public class TerraConstants {
             }
             libVersion = version;
         } catch (IOException e) {
-            TerraMinusMinus.LOGGER.error("Failed to load Terraminusminus properties file, version will be unknown");
-            TerraMinusMinus.LOGGER.catching(e);
+            TerraMinusMinus.LOGGER.error("Failed to load Terraminusminus properties file, version will be unknown", e);
         }
         LIB_VERSION = libVersion;
     }
